@@ -161,7 +161,7 @@ class PokemonListHelper(commands.Cog):
         if filters['region']:
             title_parts.append(filters['region'])
 
-        title = f"📋 Pokémon List: {' '.join(title_parts)}" if title_parts else "📋 Pokémon List"
+        title = f"📋 Pokémon List Organized By Spawnrates: {' '.join(title_parts)}" if title_parts else "📋 Pokémon List Organized By Spawnrates"
 
         embed = discord.Embed(
             title=title,
