@@ -46,8 +46,10 @@ async def load_cogs():
     """Load all cogs from the cogs folder"""
     cogs_list = [
         'cogs.event',
+        'cogs.lock',
         'cogs.helprelease', 
         'cogs.helpevolve',
+        'cogs.pokemonquesthelper',
         'cogs.helpcommands'
     ]
 
