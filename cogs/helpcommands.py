@@ -31,6 +31,12 @@ class HelpDropdown(discord.ui.Select):
                 description="Commands for recording Pokemon IDs",
                 emoji="📝",
                 value="recording"
+            ),
+            discord.SelectOption(
+                label="🔍 Quest Helper",
+                description="Commands for event quest suggestions",
+                emoji="🔍",
+                value="quest"
             )
         ]
         super().__init__(
@@ -53,6 +59,8 @@ class HelpDropdown(discord.ui.Select):
             return self.get_evolve_embed()
         elif category == "recording":
             return self.get_recording_embed()
+        elif category == "quest":
+            return self.get_quest_embed()
         return self.get_home_embed()
 
     def get_home_embed(self) -> discord.Embed:
@@ -64,7 +72,8 @@ class HelpDropdown(discord.ui.Select):
                 "**Available Categories:**\n\n"
                 "🔄 **Release Commands** - Manage your Pokemon release list\n"
                 "⚡ **Evolve Commands** - Manage your Pokemon evolve list\n"
-                "📝 **ID Recording** - Record Pokemon IDs from messages\n\n"
+                "📝 **ID Recording** - Record Pokemon IDs from messages\n"
+                "🔍 **Quest Helper** - Get Pokemon suggestions for event quests\n\n"
                 "Select a category from the dropdown below to see detailed commands!"
             ),
             color=EMBED_COLOR
@@ -335,6 +344,120 @@ class HelpDropdown(discord.ui.Select):
         embed.set_footer(text="💡 Tip: Reply to any Pokemon bot message and use !id")
         return embed
 
+    def get_quest_embed(self) -> discord.Embed:
+        """Quest helper commands help embed"""
+        embed = discord.Embed(
+            title="🔍 Quest Helper Commands",
+            description="Get smart Pokemon suggestions for event quests:",
+            color=EMBED_COLOR
+        )
+
+        embed.add_field(
+            name="🎯 Main Command",
+            value=(
+                "**`!suggest [count]`** or **`!s [count]`**\n"
+                "Analyzes the latest event quest embed and suggests Pokemon.\n"
+                "**Examples:**\n"
+                "• `!suggest` - Suggests 2 Pokemon per quest (default)\n"
+                "• `!s 3` - Suggests 3 Pokemon per quest\n"
+                "• Also works as slash command: `/suggest 3`"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="✨ How It Works",
+            value=(
+                "1️⃣ Finds the most recent event quest embed in the channel\n"
+                "2️⃣ Analyzes each quest requirement (type, region, gender)\n"
+                "3️⃣ Suggests Pokemon with **best spawn rates** first\n"
+                "4️⃣ Shows a summary with all suggestions\n"
+                "5️⃣ Click **Details** button for full quest breakdown"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📊 Features",
+            value=(
+                "• **Smart prioritization** - Suggests Pokemon with spawn rates 1/225 > 1/337 > 1/674\n"
+                "• **Type matching** - Finds Pokemon matching quest types (Fire, Water, etc.)\n"
+                "• **Region matching** - Filters by region (Kanto, Johto, etc.)\n"
+                "• **Gender quests** - Handles male, female, and genderless requirements\n"
+                "• **Dual-type support** - Considers both primary and secondary types\n"
+                "• **No duplicates** - Each Pokemon suggested once per event\n"
+                "• **Detailed info** - Shows Dex #, types, region, and spawn rate"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📋 Output Format",
+            value=(
+                "**Summary View:**\n"
+                "• Complete list of all suggested Pokemon\n"
+                "• Separate section for gender quest suggestions\n\n"
+                "**Details View** (click button):\n"
+                "• Individual quest breakdown\n"
+                "• Pokemon suggestions for each quest\n"
+                "• Full Pokemon information per suggestion"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🎮 Supported Quest Types",
+            value=(
+                "✅ Type-based quests (Fire, Water, Grass, etc.)\n"
+                "✅ Region-based quests (Kanto, Johto, etc.)\n"
+                "✅ Gender-based quests (Male, Female, Genderless)\n"
+                "✅ Combined quests (Type + Region)\n"
+                "❌ Breeding quests (skipped automatically)"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="⚙️ Parameters",
+            value=(
+                "**Count:** 1-5 Pokemon per quest\n"
+                "• Default: 2 Pokemon\n"
+                "• Higher counts give more options\n"
+                "• Best spawn rates prioritized first\n\n"
+                "**Search Range:** Last 50 messages\n"
+                "• Searches for event quest embeds\n"
+                "• Must have a field with 'quest' in the name"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="💡 Pro Tips",
+            value=(
+                "• Run command in the same channel as event embeds\n"
+                "• Use higher counts (3-5) for more variety\n"
+                "• Gender quest suggestions appear separately\n"
+                "• Click Details button to see quest-by-quest breakdown\n"
+                "• Pokemon are sorted by spawn rate for efficiency\n"
+                "• Works with any event quest format"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="⚠️ Requirements",
+            value=(
+                "• Event quest embed must be in recent messages (last 50)\n"
+                "• Embed must have a field containing 'quest' in its name\n"
+                "• Quests must follow standard format (numbered list)\n"
+                "• Bot needs permission to read message history"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="💡 Tip: Use !suggest in channels with event quest embeds")
+        return embed
+
 class HelpView(discord.ui.View):
     """View for help command with dropdown and quick navigation buttons"""
     def __init__(self):
@@ -376,6 +499,13 @@ class HelpView(discord.ui.View):
             embed = dropdown.get_recording_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
+    @discord.ui.button(label="🔍 Quest", style=discord.ButtonStyle.primary, row=2)
+    async def quest_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        dropdown = self.get_dropdown()
+        if dropdown:
+            embed = dropdown.get_quest_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+
 class HelpCommands(commands.Cog):
     """Help commands for the bot"""
 
@@ -387,7 +517,7 @@ class HelpCommands(commands.Cog):
         """
         Show help menu with command information.
         Usage: !help or !h
-        Optional: !help <category> (release/evolve/recording)
+        Optional: !help <category> (release/evolve/recording/quest)
         """
         dropdown = HelpDropdown()
 
@@ -399,6 +529,8 @@ class HelpCommands(commands.Cog):
                 embed = dropdown.get_evolve_embed()
             elif category_lower in ['recording', 'id', 'rec', 'record']:
                 embed = dropdown.get_recording_embed()
+            elif category_lower in ['quest', 'q', 'suggest', 'suggestion']:
+                embed = dropdown.get_quest_embed()
             else:
                 embed = dropdown.get_home_embed()
         else:
@@ -408,11 +540,12 @@ class HelpCommands(commands.Cog):
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
     @app_commands.command(name='help', description='Show help menu with command information')
-    @app_commands.describe(category='Choose a specific category (release/evolve/recording)')
+    @app_commands.describe(category='Choose a specific category (release/evolve/recording/quest)')
     @app_commands.choices(category=[
         app_commands.Choice(name='Release Commands', value='release'),
         app_commands.Choice(name='Evolve Commands', value='evolve'),
         app_commands.Choice(name='ID Recording', value='recording'),
+        app_commands.Choice(name='Quest Helper', value='quest'),
     ])
     async def help_slash(
         self, 
@@ -433,6 +566,8 @@ class HelpCommands(commands.Cog):
                 embed = dropdown.get_evolve_embed()
             elif category_value == 'recording':
                 embed = dropdown.get_recording_embed()
+            elif category_value == 'quest':
+                embed = dropdown.get_quest_embed()
             else:
                 embed = dropdown.get_home_embed()
         else:
