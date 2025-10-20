@@ -25,6 +25,8 @@ class PokemonQuestHelper(commands.Cog):
         self.pokemon_data = {}
         self.spawn_rates = {}
         self.gender_data = {'male': set(), 'female': set(), 'genderless': set()}
+        self.AUTO_SUGGEST_CHANNEL_ID = 1429692867022164018  # Channel to monitor
+        self.processed_messages = set()  # Track processed message IDs
         self.load_data()
 
     def load_data(self):
@@ -220,6 +222,152 @@ class PokemonQuestHelper(commands.Cog):
 
         return f"→ **{pokemon['name']}** (#{pokemon['dex']:03d}, {types}, {pokemon['region']}, {pokemon['spawn_rate']})"
 
+    def is_quest_embed(self, embed: discord.Embed) -> bool:
+        """Check if an embed contains quest information"""
+        if not embed.fields:
+            return False
+
+        for field in embed.fields:
+            if 'quest' in field.name.lower():
+                # Check if it has quest-like content (numbered lists with "Catch")
+                if re.search(r'\d+\..*[Cc]atch', field.value):
+                    return True
+        return False
+
+    async def process_quest_embed(self, message: discord.Message, count: int = 2):
+        """Process a quest embed and send suggestions"""
+        embed = message.embeds[0]
+
+        # Find the quest field
+        quest_field = None
+        for field in embed.fields:
+            if 'quest' in field.name.lower():
+                quest_field = field
+                break
+
+        if not quest_field:
+            return
+
+        # Parse quests from the field value
+        quest_lines = quest_field.value.split('\n')
+
+        # Build summary embed (just the list)
+        summary_embed = discord.Embed(
+            title='🔍 Pokémon Quest Suggestions',
+            description=f'Suggesting **{count} Pokémon** per quest from the event: **{embed.title}**',
+            color=EMBED_COLOR
+        )
+
+        # Build detailed embed (with quest breakdown)
+        details_embed = discord.Embed(
+            title='🔍 Pokémon Quest Suggestions - Details',
+            description=f'Detailed breakdown for the event: **{embed.title}**',
+            color=EMBED_COLOR
+        )
+
+        suggestions = []
+        all_suggested_pokemon = set()
+        gender_suggestions = []
+
+        for line in quest_lines:
+            if not line.strip() or not re.search(r'^\d+\.', line.strip()):
+                continue
+
+            quest_info = self.parse_quest(line)
+            if not quest_info:
+                continue
+
+            matches = self.find_matching_pokemon(quest_info, limit=count)
+
+            if matches:
+                quest_text = re.sub(r'<:[^>]+>', '', quest_info['text'])
+                quest_text = re.sub(r'\d+/\d+$', '', quest_text).strip()
+
+                suggestion_text = f"**Quest:** {quest_text}\n"
+                for pokemon in matches:
+                    suggestion_text += self.format_pokemon_info(pokemon) + '\n'
+
+                    # Only add to main list if not a gender quest
+                    if not quest_info.get('gender'):
+                        all_suggested_pokemon.add(pokemon['name'])
+
+                # Separate gender quests from regular quests
+                if quest_info.get('gender'):
+                    gender_pokemon_names = ', '.join([p['name'] for p in matches])
+                    gender_type = 'Unknown gender' if quest_info['gender'] == 'genderless' else quest_info['gender'].capitalize() + ' gender'
+                    gender_suggestions.append({
+                        'text': f"**{quest_text}**\n{gender_pokemon_names}",
+                        'quest_text': quest_text,
+                        'pokemon': gender_pokemon_names
+                    })
+
+                suggestions.append(suggestion_text)
+
+        if suggestions:
+            # Add quest details to the details embed
+            for i, suggestion in enumerate(suggestions[:25]):
+                details_embed.add_field(
+                    name=f'🌧️',
+                    value=suggestion,
+                    inline=False
+                )
+
+            # Add main Pokémon list to summary embed (excluding gender quests)
+            if all_suggested_pokemon:
+                pokemon_list = ', '.join(sorted(all_suggested_pokemon))
+                summary_embed.add_field(
+                    name='📋 All Suggested Pokémon',
+                    value=pokemon_list,
+                    inline=False
+                )
+
+                # Also add to details embed
+                details_embed.add_field(
+                    name='📋 All Suggested Pokémon',
+                    value=pokemon_list,
+                    inline=False
+                )
+
+            # Add gender quest suggestions separately on summary embed
+            if gender_suggestions:
+                for gender_info in gender_suggestions:
+                    summary_embed.add_field(
+                        name='👥 Gender Quest Suggestions',
+                        value=gender_info['text'],
+                        inline=False
+                    )
+
+            if len(suggestions) > 25:
+                details_embed.set_footer(text=f'Showing 25 of {len(suggestions)} quests')
+
+            # Create view with Details button
+            view = DetailsView(details_embed)
+
+            await message.reply(embed=summary_embed, view=view, mention_author=False)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Listen for quest embeds in the monitored channel"""
+        # Ignore messages not in the target channel
+        if message.channel.id != self.AUTO_SUGGEST_CHANNEL_ID:
+            return
+
+        # Check if message already processed
+        if message.id in self.processed_messages:
+            return
+
+        # Check if message has embeds with quests
+        if message.embeds and self.is_quest_embed(message.embeds[0]):
+            # Mark as processed
+            self.processed_messages.add(message.id)
+
+            # Keep only last 100 processed messages in memory
+            if len(self.processed_messages) > 100:
+                self.processed_messages = set(list(self.processed_messages)[-100:])
+
+            # Process the quest embed
+            await self.process_quest_embed(message)
+
     @commands.hybrid_command(name='suggest', aliases=['s'], description='Suggest Pokémon for event quests')
     @app_commands.describe(count='Number of Pokémon to suggest per quest (default: 2)')
     async def suggest(self, ctx, count: int = 2):
@@ -230,114 +378,9 @@ class PokemonQuestHelper(commands.Cog):
 
         # Try to find the latest message with an embed containing quests
         async for message in ctx.channel.history(limit=50):
-            if message.embeds:
-                embed = message.embeds[0]
-                # Check if this is an event embed with quests
-                if embed.fields:
-                    quest_field = None
-                    for field in embed.fields:
-                        if 'quest' in field.name.lower():
-                            quest_field = field
-                            break
-
-                    if quest_field:
-                        # Parse quests from the field value
-                        quest_lines = quest_field.value.split('\n')
-
-                        # Build summary embed (just the list)
-                        summary_embed = discord.Embed(
-                            title='🔍 Pokémon Quest Suggestions',
-                            description=f'Suggesting **{count} Pokémon** per quest from the event: **{embed.title}**',
-                            color=EMBED_COLOR
-                        )
-
-                        # Build detailed embed (with quest breakdown)
-                        details_embed = discord.Embed(
-                            title='🔍 Pokémon Quest Suggestions - Details',
-                            description=f'Detailed breakdown for the event: **{embed.title}**',
-                            color=EMBED_COLOR
-                        )
-
-                        suggestions = []
-                        all_suggested_pokemon = set()
-                        gender_suggestions = []
-
-                        for line in quest_lines:
-                            if not line.strip() or not re.search(r'^\d+\.', line.strip()):
-                                continue
-
-                            quest_info = self.parse_quest(line)
-                            if not quest_info:
-                                continue
-
-                            matches = self.find_matching_pokemon(quest_info, limit=count)
-
-                            if matches:
-                                quest_text = re.sub(r'<:[^>]+>', '', quest_info['text'])
-                                quest_text = re.sub(r'\d+/\d+$', '', quest_text).strip()
-
-                                suggestion_text = f"**Quest:** {quest_text}\n"
-                                for pokemon in matches:
-                                    suggestion_text += self.format_pokemon_info(pokemon) + '\n'
-
-                                    # Only add to main list if not a gender quest
-                                    if not quest_info.get('gender'):
-                                        all_suggested_pokemon.add(pokemon['name'])
-
-                                # Separate gender quests from regular quests
-                                if quest_info.get('gender'):
-                                    gender_pokemon_names = ', '.join([p['name'] for p in matches])
-                                    gender_type = 'Unknown gender' if quest_info['gender'] == 'genderless' else quest_info['gender'].capitalize() + ' gender'
-                                    gender_suggestions.append({
-                                        'text': f"**{quest_text}**\n{gender_pokemon_names}",
-                                        'quest_text': quest_text,
-                                        'pokemon': gender_pokemon_names
-                                    })
-
-                                suggestions.append(suggestion_text)
-
-                        if suggestions:
-                            # Add quest details to the details embed
-                            for i, suggestion in enumerate(suggestions[:25]):
-                                details_embed.add_field(
-                                    name=f'Quest {i+1}',
-                                    value=suggestion,
-                                    inline=False
-                                )
-
-                            # Add main Pokémon list to summary embed (excluding gender quests)
-                            if all_suggested_pokemon:
-                                pokemon_list = ', '.join(sorted(all_suggested_pokemon))
-                                summary_embed.add_field(
-                                    name='📋 All Suggested Pokémon',
-                                    value=pokemon_list,
-                                    inline=False
-                                )
-
-                                # Also add to details embed
-                                details_embed.add_field(
-                                    name='📋 All Suggested Pokémon',
-                                    value=pokemon_list,
-                                    inline=False
-                                )
-
-                            # Add gender quest suggestions separately on summary embed
-                            if gender_suggestions:
-                                for gender_info in gender_suggestions:
-                                    summary_embed.add_field(
-                                        name='👥 Gender Quest Suggestions',
-                                        value=gender_info['text'],
-                                        inline=False
-                                    )
-
-                            if len(suggestions) > 25:
-                                details_embed.set_footer(text=f'Showing 25 of {len(suggestions)} quests')
-
-                            # Create view with Details button
-                            view = DetailsView(details_embed)
-
-                            await ctx.reply(embed=summary_embed, view=view, mention_author=False)
-                            return
+            if message.embeds and self.is_quest_embed(message.embeds[0]):
+                await self.process_quest_embed(message, count)
+                return
 
         await ctx.reply('❌ No event quest embed found in recent messages. Please run this command in a channel with an event embed.', mention_author=False)
 
