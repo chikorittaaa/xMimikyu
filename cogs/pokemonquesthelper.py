@@ -29,6 +29,12 @@ class PokemonQuestHelper(commands.Cog):
         self.processed_messages = set()  # Track processed message IDs
         self.load_data()
 
+    def is_regional_variant(self, pokemon_name: str) -> bool:
+        """Check if a Pokémon is a regional variant"""
+        regional_prefixes = ['alolan', 'galarian', 'hisuian', 'paldean']
+        name_lower = pokemon_name.lower()
+        return any(prefix in name_lower for prefix in regional_prefixes)
+
     def load_data(self):
         """Load Pokémon data and spawn rates from CSV files"""
         try:
@@ -169,6 +175,10 @@ class PokemonQuestHelper(commands.Cog):
                     if any(m['dex'] == dex for m in matches):
                         continue
 
+                    # Skip regional variants
+                    if self.is_regional_variant(data['name']):
+                        continue
+
                     # Check if Pokémon is in gender list and has spawn rate
                     if data['name'] in gender_pokemon and dex in self.spawn_rates and self.spawn_rates[dex] == priority:
                         matches.append({**data, 'spawn_rate': self.spawn_rates[dex]})
@@ -188,6 +198,10 @@ class PokemonQuestHelper(commands.Cog):
 
                 # Skip if already in matches
                 if any(m['dex'] == dex for m in matches):
+                    continue
+
+                # Skip regional variants
+                if self.is_regional_variant(data['name']):
                     continue
 
                 # Skip if no spawn rate data
