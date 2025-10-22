@@ -11,7 +11,7 @@ class EvolveListView(discord.ui.View):
         self.once_ids = once_ids
         self.twice_ids = twice_ids
         self.ids_per_page = ids_per_page
-        self.current_tab = "twice"  # Start with twice (priority)
+        self.current_tab = "once"  # Start with once (priority)
         self.current_page = 0
         self.message: Optional[discord.Message] = None
 
@@ -34,7 +34,7 @@ class EvolveListView(discord.ui.View):
         """Get embed for current tab and page"""
         if self.current_tab == "once":
             pages = self.once_pages
-            tab_name = "1x Use"
+            tab_name = "1x Use (Priority)"
             total = len(self.once_ids)
         else:
             pages = self.twice_pages
@@ -58,7 +58,7 @@ class EvolveListView(discord.ui.View):
         embed.set_footer(text=footer_text)
         return embed
 
-    @discord.ui.button(label="Once (1x)", style=discord.ButtonStyle.secondary, custom_id="tab_once")
+    @discord.ui.button(label="Once (1x) ⭐", style=discord.ButtonStyle.primary, custom_id="tab_once")
     async def once_tab(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_tab = "once"
         self.current_page = 0
@@ -258,26 +258,29 @@ class EvolveIDsModal(discord.ui.Modal, title="Evolve Pokemon IDs"):
             )
             return
 
-        sorted_ids = sorted(current_ids, key=lambda x: x['uses'], reverse=True)
-        ids_to_evolve = sorted_ids[:count]
-        remaining_ids = []
-
-        for item in sorted_ids[count:]:
-            remaining_ids.append(item)
-
-        for item in ids_to_evolve:
-            if item['uses'] > 1:
-                remaining_ids.append({'id': item['id'], 'uses': item['uses'] - 1})
+        # Priority: Pick from 1x (once) first, then 2x (twice)
+        ids_to_evolve, remaining_ids = self.cog.select_ids_with_priority(current_ids, count)
 
         await self.cog.save_user_ids(interaction.user.id, remaining_ids)
 
         ids_string = ' '.join([item['id'] for item in ids_to_evolve])
 
+        # Count how many came from each category
+        once_used = sum(1 for item in ids_to_evolve if item['uses'] == 1)
+        twice_used = sum(1 for item in ids_to_evolve if item['uses'] == 2)
+        
+        footer_parts = []
+        if once_used > 0:
+            footer_parts.append(f"{once_used} from 1x")
+        if twice_used > 0:
+            footer_parts.append(f"{twice_used} from 2x")
+        footer_text = f"{count} ID(s) used ({', '.join(footer_parts)}) • {len(remaining_ids)} remaining"
+
         embed = discord.Embed(
             description=f"```\n<@716390085896962058> evolve {ids_string}\n```",
             color=EMBED_COLOR
         )
-        embed.set_footer(text=f"{count} ID(s) used for evolution • {len(remaining_ids)} remaining")
+        embed.set_footer(text=footer_text)
 
         await interaction.response.send_message(embed=embed)
 
@@ -371,6 +374,47 @@ class HelpEvolve(commands.Cog):
             upsert=True
         )
 
+    def select_ids_with_priority(self, current_ids: List[Dict], count: int) -> tuple[List[Dict], List[Dict]]:
+        """
+        Select IDs with priority: 1x (once) first, then 2x (twice)
+        Returns: (ids_to_evolve, remaining_ids)
+        """
+        # Separate into once and twice lists
+        once_ids = [item for item in current_ids if item['uses'] == 1]
+        twice_ids = [item for item in current_ids if item['uses'] == 2]
+
+        ids_to_evolve = []
+        
+        # First, take from once (1x) list
+        if len(once_ids) >= count:
+            # We have enough in once list
+            ids_to_evolve = once_ids[:count]
+            remaining_once = once_ids[count:]
+            remaining_twice = twice_ids
+        else:
+            # Take all from once, then fill from twice
+            ids_to_evolve = once_ids.copy()
+            needed = count - len(once_ids)
+            ids_to_evolve.extend(twice_ids[:needed])
+            remaining_once = []
+            remaining_twice = twice_ids[needed:]
+
+        # Build remaining IDs list
+        remaining_ids = []
+        
+        # Add remaining once IDs (these stay as is)
+        remaining_ids.extend(remaining_once)
+        
+        # Add remaining twice IDs (these stay as is)
+        remaining_ids.extend(remaining_twice)
+        
+        # For twice IDs that were used, add them back with uses-1
+        for item in ids_to_evolve:
+            if item['uses'] == 2:
+                remaining_ids.append({'id': item['id'], 'uses': 1})
+
+        return ids_to_evolve, remaining_ids
+
     @commands.command(name='evolvepanel', aliases=['ep'])
     async def evolve_panel(self, ctx: commands.Context):
         """
@@ -388,6 +432,7 @@ class HelpEvolve(commands.Cog):
                 "📋 **View List** - See all your saved IDs\n"
                 "🗑️ **Clear All** - Remove all IDs from your list\n"
                 "🔄 **Evolve IDs** - Use IDs to evolve Pokemon\n\n"
+                "⭐ **Priority System:** IDs with 1x use are picked first, then 2x use\n"
                 "*Panel expires after 5 minutes of inactivity*"
             ),
             color=EMBED_COLOR
@@ -548,27 +593,29 @@ class HelpEvolve(commands.Cog):
             await ctx.send(f"❌ You only have {available_count} ID(s) available in your evolve list!")
             return
 
-        sorted_ids = sorted(current_ids, key=lambda x: x['uses'], reverse=True)
-
-        ids_to_evolve = sorted_ids[:count]
-        remaining_ids = []
-
-        for item in sorted_ids[count:]:
-            remaining_ids.append(item)
-
-        for item in ids_to_evolve:
-            if item['uses'] > 1:
-                remaining_ids.append({'id': item['id'], 'uses': item['uses'] - 1})
+        # Priority: Pick from 1x (once) first, then 2x (twice)
+        ids_to_evolve, remaining_ids = self.select_ids_with_priority(current_ids, count)
 
         await self.save_user_ids(ctx.author.id, remaining_ids)
 
         ids_string = ' '.join([item['id'] for item in ids_to_evolve])
 
+        # Count how many came from each category
+        once_used = sum(1 for item in ids_to_evolve if item['uses'] == 1)
+        twice_used = sum(1 for item in ids_to_evolve if item['uses'] == 2)
+        
+        footer_parts = []
+        if once_used > 0:
+            footer_parts.append(f"{once_used} from 1x")
+        if twice_used > 0:
+            footer_parts.append(f"{twice_used} from 2x")
+        footer_text = f"{count} ID(s) used ({', '.join(footer_parts)}) • {len(remaining_ids)} remaining"
+
         embed = discord.Embed(
             description=f"```\n<@716390085896962058> evolve {ids_string}\n```",
             color=EMBED_COLOR
         )
-        embed.set_footer(text=f"{count} ID(s) used for evolution • {len(remaining_ids)} remaining")
+        embed.set_footer(text=footer_text)
 
         await ctx.send(embed=embed)
 
@@ -600,27 +647,29 @@ class HelpEvolve(commands.Cog):
             )
             return
 
-        sorted_ids = sorted(current_ids, key=lambda x: x['uses'], reverse=True)
-
-        ids_to_evolve = sorted_ids[:count]
-        remaining_ids = []
-
-        for item in sorted_ids[count:]:
-            remaining_ids.append(item)
-
-        for item in ids_to_evolve:
-            if item['uses'] > 1:
-                remaining_ids.append({'id': item['id'], 'uses': item['uses'] - 1})
+        # Priority: Pick from 1x (once) first, then 2x (twice)
+        ids_to_evolve, remaining_ids = self.select_ids_with_priority(current_ids, count)
 
         await self.save_user_ids(interaction.user.id, remaining_ids)
 
         ids_string = ' '.join([item['id'] for item in ids_to_evolve])
 
+        # Count how many came from each category
+        once_used = sum(1 for item in ids_to_evolve if item['uses'] == 1)
+        twice_used = sum(1 for item in ids_to_evolve if item['uses'] == 2)
+        
+        footer_parts = []
+        if once_used > 0:
+            footer_parts.append(f"{once_used} from 1x")
+        if twice_used > 0:
+            footer_parts.append(f"{twice_used} from 2x")
+        footer_text = f"{count} ID(s) used ({', '.join(footer_parts)}) • {len(remaining_ids)} remaining"
+
         embed = discord.Embed(
             description=f"```\n<@716390085896962058> evolve {ids_string}\n```",
             color=EMBED_COLOR
         )
-        embed.set_footer(text=f"{count} ID(s) used for evolution • {len(remaining_ids)} remaining")
+        embed.set_footer(text=footer_text)
 
         await interaction.response.send_message(embed=embed)
 
