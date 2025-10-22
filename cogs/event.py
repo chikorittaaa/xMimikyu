@@ -20,8 +20,9 @@ class IDRecorder:
 
     def extract_ids(self, description: str) -> Set[str]:
         """Extract Pokemon IDs from embed description"""
-        # Pattern matches IDs that are either bold or not: `398121` or **`398121`**
-        pattern = r'\*?\*?`(\d+)`\*?\*?'
+        # Simplified pattern - matches any number wrapped in backticks
+        # Works for both `398121` and **`398121`**
+        pattern = r'`(\d+)`'
         matches = re.findall(pattern, description)
         return set(matches)
 
