@@ -390,7 +390,27 @@ class PokemonQuestHelper(commands.Cog):
             await ctx.reply('❌ Please provide a count between 1 and 5.', mention_author=False)
             return
 
-        # Try to find the latest message with an embed containing quests
+        # Check if user replied to a message (only works with prefix commands like !suggest)
+        if hasattr(ctx.message, 'reference') and ctx.message.reference:
+            try:
+                # Get the replied-to message
+                replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+                
+                # Check if the replied message has a quest embed
+                if replied_message.embeds and self.is_quest_embed(replied_message.embeds[0]):
+                    await self.process_quest_embed(replied_message, count)
+                    return
+                else:
+                    await ctx.reply('❌ The replied message does not contain an event quest embed.', mention_author=False)
+                    return
+            except discord.NotFound:
+                await ctx.reply('❌ Could not find the replied message.', mention_author=False)
+                return
+            except discord.HTTPException:
+                await ctx.reply('❌ An error occurred while fetching the replied message.', mention_author=False)
+                return
+
+        # If no reply, try to find the latest message with an embed containing quests
         async for message in ctx.channel.history(limit=50):
             if message.embeds and self.is_quest_embed(message.embeds[0]):
                 await self.process_quest_embed(message, count)
