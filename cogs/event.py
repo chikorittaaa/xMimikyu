@@ -12,7 +12,7 @@ class IDRecorder:
     def __init__(self, message: discord.Message, user_id: int, control_message: Optional[discord.Message], user_mention: str):
         self.message = message
         self.user_id = user_id
-        self.user_mention = user_mention  # Store user mention
+        self.user_mention = user_mention  # Store user mentionn
         self.ids: Set[str] = set()
         self.is_recording = True
         self.control_message = control_message
